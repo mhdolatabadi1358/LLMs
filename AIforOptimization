@@ -1,0 +1,120 @@
+#pip install openai
+
+import openai
+import os
+import subprocess
+
+os.environ['OPENAI_API_KEY'] = "YOUR_OPENAI_API_KEY" # REPLACE WITH YOUR ACTUAL KEY
+openai.api_key = os.environ['OPENAI_API_KEY']
+
+
+# --- Part 1: Get Python code from the LLM ---
+
+prompt = "Write a Python program that approximately (numerically not symbolic way) solves the following optimization problem: minimize (-2*x^2+3*x*y-x*z+y*z+y^2-z^2)/(x^2+y^2+z^2). Please, no explanation or comments. Just the pure code that returns a real number as optimal value"
+
+
+
+for i in range(10): # Loop through 10 attempts
+    print(f"\n--- Attempt {i+1} ---")
+    
+    generated_code = "" # Initialize to empty string for safety
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=150,
+            top_p=1.0,
+            frequency_penalty=0.0,
+            presence_penalty=0.0
+        )
+        
+        generated_code = response.choices[0].message.content.strip()
+        
+        # Clean up markdown code blocks if present
+        if generated_code.startswith("```python"):
+            generated_code = generated_code[len("```python"):]
+            if generated_code.endswith("```"):
+                generated_code = generated_code[:-len("```")]
+        elif generated_code.startswith("```"): # For cases like just ``` followed by code
+            generated_code = generated_code[len("```"):]
+            if generated_code.endswith("```"):
+                generated_code = generated_code[:-len("```")]
+                
+        print("Generated Code:")
+        print(generated_code)
+
+    except Exception as e:
+        print(f"--- Error generating code from LLM: {e} ---")
+        print("Skipping this iteration due to LLM generation error.")
+        continue # Skip to the next iteration if LLM call fails
+        
+    # --- Part 2: Save the generated Python code to a file ---
+    python_file = "sum_of_numbers.py"
+    try:
+        with open(python_file, "w") as f:
+            f.write(generated_code)
+    except IOError as e:
+        print(f"--- Error saving file '{python_file}': {e} ---")
+        print("Skipping this iteration due to file saving error.")
+        continue # Skip if unable to write the file
+
+    # --- Part 3: Run the generated Python file using subprocess ---
+    try:
+        result = subprocess.run(
+            ["python", python_file],
+            capture_output=True,
+            text=True,
+            check=True,  # 'check=True' will raise CalledProcessError for non-zero exit codes
+            timeout=30   # Add a timeout to prevent hanging indefinitely
+        )
+        
+        # If we reach here, the subprocess completed with a 0 exit status
+        
+        # Check for any stderr output (e.g., warnings from the script itself)
+        if result.stderr:
+            print(f"Warnings/Non-fatal errors from {python_file}:\n{result.stderr}")
+            # You might decide to continue here if warnings are also a reason to skip
+            # For now, we'll process stdout even with warnings unless they are critical.
+            
+        print(f"Output from {python_file} (STDOUT):")
+        print(result.stdout)
+        
+        # Attempt to parse the output as a float
+        try:
+            optimal_value = float(result.stdout.strip())
+            print(f"Successfully parsed optimal value: {optimal_value}")
+            # At this point, optimal_value is a valid float, you can use it.
+        except ValueError:
+            print(f"--- Parsing Error: Could not convert '{result.stdout.strip()}' to a float. ---")
+            print("Skipping this iteration because output is not a valid number.")
+            continue # Skip if parsing fails
+            
+    except subprocess.CalledProcessError as e:
+        # This catches errors where the Python script exited with a non-zero status
+        print(f"\n--- Error: {python_file} returned non-zero exit status {e.returncode} ---")
+        print(f"Command: {e.cmd}")
+        print(f"STDOUT from error:\n{e.stdout}") # Output before the error occurred
+        print(f"STDERR from error:\n{e.stderr}") # The actual error message from the script
+        print("Skipping this iteration due to script execution error.")
+        continue # Continue to the next iteration of the loop
+        
+    except subprocess.TimeoutExpired as e:
+        # This catches errors where the Python script took too long to run
+        print(f"\n--- Error: {python_file} timed out after {e.timeout} seconds ---")
+        print(f"Command: {e.cmd}")
+        print(f"Output so far (if any):\n{e.stdout}") # Output that was buffered before timeout
+        print("Skipping this iteration due to timeout.")
+        continue # Continue to the next iteration of the loop
+        
+    except Exception as e:
+        # This is a general catch-all for any other unexpected errors in the subprocess handling
+        print(f"\n--- An unexpected error occurred while running or processing {python_file}: {e} ---")
+        print("Skipping this iteration due to an unhandled error.")
+        continue # Continue to the next iteration of the loop
+
+print("\n--- All attempts completed ---")
+
