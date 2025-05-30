@@ -1,0 +1,63 @@
+#pip install openai
+
+import openai
+import os
+import subprocess
+
+os.environ['OPENAI_API_KEY'] = "YOUR_OPENAI_API_KEY" # REPLACE WITH YOUR ACTUAL KEY
+openai.api_key = os.environ['OPENAI_API_KEY']
+
+
+# --- Part 1: Get MATLAB code from the LLM ---
+prompt = "Write a MATLAB program that approximately (numerically not symbolic way) solves the following optimization problem: minimize (-2*x^2+3*x*y-x*z+y*z+y^2-z^2)/(x^2+y^2+z^2). Please, no explanation or comments. Just the pure code that returns a real number as optimal value"
+for i in range(20):  
+  response = openai.chat.completions.create(
+    model="gpt-3.5-turbo", 
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": prompt}
+    ],
+    temperature=0.7,    max_tokens=150,    top_p=1.0,    frequency_penalty=0.0,    presence_penalty=0.0)
+  
+  generated_code = response.choices[0].message.content.strip()
+  
+  # Clean up markdown code blocks if present
+  if generated_code.startswith("```matlab\n"):
+    generated_code = generated_code[len("```matlab\n"):]
+    if generated_code.endswith("\n```"):
+        generated_code = generated_code[:-len("\n```")]
+  elif generated_code.startswith("```"):
+    generated_code = generated_code[len("```"):]
+    if generated_code.endswith("```"):
+        generated_code = generated_code[:-len("```")] 
+  
+  # --- Part 2: Save the generated MATLAB code to a file ---
+  matlab_file_name = "sum_of_squares.m" # MATLAB files typically end with .m
+  with open(matlab_file_name, "w") as f:
+    f.write(generated_code)
+  
+  # --- Part 3: Run the generated MATLAB file using subprocess ---
+  
+  matlab_command = f"run('{matlab_file_name}');"
+  matlab_executable_path = r"E:\MATLAB\R2018b\bin\matlab.exe"
+  # You might need to adjust the path to your MATLAB executable
+  try:
+    result = subprocess.run(
+        [matlab_executable_path, "-batch", matlab_command],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30 # Add a timeout to prevent hanging if MATLAB takes too long
+      )
+    if result.stderr=='':
+       #print(float(result.stdout))
+       print(generated_code)
+       print(result.stdout)
+    else:
+       print(result.stderr)
+  except subprocess.CalledProcessError as e:
+    continue
+  except subprocess.TimeoutExpired:
+    continue
+  except Exception as e:
+    continue
